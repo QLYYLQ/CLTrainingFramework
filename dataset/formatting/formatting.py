@@ -37,7 +37,7 @@ ColumnFormat = TypeVar("ColumnFormat")
 BatchFormat = TypeVar("BatchFormat")
 
 
-def _is_range_contiguous(key: range) -> bool:
+def is_range_contiguous(key: range) -> bool:
     return key.step == 1 and key.stop >= key.start
 
 
@@ -62,7 +62,7 @@ def _query_table_with_indices_mapping(
     if isinstance(key, slice):
         key = range(*key.indices(indices.num_rows))
     if isinstance(key, range):
-        if _is_range_contiguous(key) and key.start >= 0:
+        if is_range_contiguous(key) and key.start >= 0:
             return _query_table(
                 table, [i.as_py() for i in indices.fast_slice(key.start, key.stop - key.start).column(0)]
             )
@@ -86,7 +86,7 @@ def _query_table(table: Table, key: Union[int, slice, range, str, Iterable]) -> 
     if isinstance(key, slice):
         key = range(*key.indices(table.num_rows))
     if isinstance(key, range):
-        if _is_range_contiguous(key) and key.start >= 0:
+        if is_range_contiguous(key) and key.start >= 0:
             return table.fast_slice(key.start, key.stop - key.start)
         else:
             pass  # treat as an iterable
@@ -221,13 +221,13 @@ class PythonFeaturesDecoder:
         self.token_per_repo_id = token_per_repo_id
 
     def load_from_storage_with_row(self, row: dict) -> dict:
-        return self.schema.sample_from_storage(row, token_per_repo_id=self.token_per_repo_id) if self.schema else row
+        return self.schema.sample_from_storage(row, token_pre_repo_id=self.token_per_repo_id) if self.schema else row
 
     def load_from_storage_with_column(self, column: list, column_name: str) -> list:
-        return self.schema.column_from_storage(column, column_name) if self.features else column
+        return self.schema.column_from_storage(column, column_name) if self.schema else column
 
     def load_from_storage_with_batch(self, batch: dict) -> dict:
-        return self.schema.batch_from_storage(batch) if self.features else batch
+        return self.schema.batch_from_storage(batch) if self.schema else batch
 
 
 class PandasFeaturesDecoder:
@@ -251,7 +251,7 @@ class PandasFeaturesDecoder:
     def decode_column(self, column: pd.Series, column_name: str) -> pd.Series:
         decode = (
             no_op_if_value_is_null(partial(load_from_storage_with_nested_sample, self.schema[column_name]))
-            if self.schema and column_name in self.schema and self.schema._column_requires_decoding[column_name]
+            if self.schema and column_name in self.schema and self.schema._required_unpack_column[column_name]
             else None
         )
         if decode:

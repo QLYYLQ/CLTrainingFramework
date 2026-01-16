@@ -8,6 +8,7 @@ from CLTrainingFramework.io.Register import (
     MetaIO,
 )
 from .handler import BaseText, YamlText, JsonText, BaseImage, ImageIOMeta,TextIOMeta
+from CLTrainingFramework.io.stub_generator import generate_io_stubs
 
 IO = io_builder()
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     "IO",
     "io_builder",
     "RegisterDict",
+    "generate_io_stubs",
 ]

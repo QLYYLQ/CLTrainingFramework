@@ -1,7 +1,7 @@
 from os import PathLike
 from os.path import splitext
 from pathlib import Path
-from typing import Optional, Type, Any, TypeVar, Union, Literal
+from typing import Optional, Type, Any, TypeVar, Union, Literal, Callable
 
 
 from CLTrainingFramework.io.Protocol import _T_ModalityRegistry, IOProtocol
@@ -30,10 +30,12 @@ class IO:
             instances with string keys.
             self._previous_method (IOProtocol): Previous IOProtocol instance
             self._previous_suffix (str): Previous path suffix
+            self._previous_load_func: Cached load function for fast path
         """
         self._modality = modality
         self._previous_method: Optional[IOProtocol] = None
         self._previous_suffix: Optional[str] = None
+        self._previous_load_func: Optional[Callable[..., Any]] = None
         self._io_cache: dict[str, IOProtocol] = {}
 
     def load(
@@ -43,12 +45,40 @@ class IO:
         collision_dict: Optional[dict[str, str]] = None,
         **kwargs,
     ) -> Any:
+        # 快速路径：如果已经有缓存的 load 函数，先尝试快速检查
+        if self._previous_load_func is not None:
+            # 快速后缀提取（针对字符串路径优化）
+            if isinstance(path, str):
+                # 对于字符串，直接从末尾查找最后一个点
+                dot_idx = path.rfind('.')
+                if dot_idx != -1:
+                    suffix = path[dot_idx + 1:].lower()
+                    if suffix == self._previous_suffix:
+                        return self._previous_load_func(path, **kwargs)
+            elif isinstance(path, Path):
+                suffix = path.suffix.lstrip(".").lower()
+                if suffix == self._previous_suffix:
+                    return self._previous_load_func(path, **kwargs)
+            else:
+                # 其他类型，使用标准方法
+                suffix = self._get_path_suffix(path).lstrip(".").lower()
+                if suffix == self._previous_suffix:
+                    return self._previous_load_func(path, **kwargs)
+        
+        # 慢速路径：需要查找或更新 handler
+        suffix = self._get_path_suffix(path).lstrip(".").lower()
         _collision_dict = {} if collision_dict is None else collision_dict
         if modality is None and self._modality is not None:
             io_method = self.get_io(path, self._modality, _collision_dict)
         else:
             io_method = self.get_io(path, modality, _collision_dict)
-        return io_method.load(path,**kwargs)
+        
+        # 更新缓存（包括 load 函数）
+        self._previous_suffix = suffix
+        self._previous_method = io_method
+        self._previous_load_func = io_method.load
+        
+        return io_method.load(path, **kwargs)
 
     def write(
         self,
@@ -71,12 +101,15 @@ class IO:
         modality: Optional[str] = None,
         collision_dict: Optional[dict[str, str]] = None,
     ) -> IOProtocol:
-        suffix = self._get_path_suffix(path)
-        suffix = suffix.lstrip(".")
-        if suffix is self._previous_suffix:
+        suffix = self._get_path_suffix(path).lstrip(".").lower()
+        if suffix == self._previous_suffix:
             assert self._previous_method is not None
             return self._previous_method
         io_method, _ = self._get_io_method_by_suffix(suffix, modality, collision_dict)
+        # 更新缓存
+        self._previous_suffix = suffix
+        self._previous_method = io_method
+        self._previous_load_func = io_method.load
         return io_method
 
     @staticmethod
